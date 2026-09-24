@@ -1,0 +1,27 @@
+# dependencies / builds
+node_modules/
+.next/
+dist/
+build/
+*.tsbuildinfo
+next-env.d.ts
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# env / secrets
+.env
+.env.local
+.env.*.local
+
+# editors / os
+.vscode/
+.idea/
+.DS_Store
+
+# docker volumes
+infra/.data/
