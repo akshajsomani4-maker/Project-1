@@ -1,0 +1,71 @@
+cubes:
+  - name: customer_activity
+    sql_table: public.customer_quarters
+    data_source: default
+    title: Customer activity
+    description: >
+      Grain: one row per customer per quarter, carrying retention flags
+      (active_last_quarter, active_this_quarter, churned). This is what makes
+      the governed churn metric computable without raw SQL.
+
+    joins:
+      - name: customers
+        relationship: many_to_one
+        sql: "{CUBE}.customer_id = {customers}.customer_id"
+
+    dimensions:
+      - name: customer_id
+        sql: customer_id
+        type: string
+        title: Customer ID
+        primary_key: true
+
+      - name: quarter_start
+        sql: quarter_start
+        type: time
+        title: Quarter start
+        description: First day of the quarter this retention row describes.
+
+      - name: quarter
+        sql: quarter_label
+        type: string
+        title: Quarter
+        description: "Labelled quarter, for example 2026-Q2."
+
+      - name: active_last_quarter
+        sql: "active_last_quarter = 1"
+        type: boolean
+        title: Active last quarter
+
+      - name: active_this_quarter
+        sql: "active_this_quarter = 1"
+        type: boolean
+        title: Active this quarter
+
+      - name: churned
+        sql: "churned = 1"
+        type: boolean
+        title: Churned
+
+    measures:
+      - name: active_customers
+        type: count
+        title: Active customers (prior period)
+        description: active_customers = COUNT(rows) WHERE active_last_quarter = 1. Customers that ordered in the previous quarter.
+        filters:
+          - sql: "{CUBE}.active_last_quarter = 1"
+
+      - name: churned_customers
+        type: count
+        title: Churned customers
+        description: churned_customers = COUNT(rows) WHERE churned = 1. Customers active last quarter with no order this quarter.
+        filters:
+          - sql: "{CUBE}.churned = 1"
+
+      - name: churn_rate
+        sql: "1.0 * {churned_customers} / NULLIF({active_customers}, 0)"
+        type: number
+        title: Churn rate
+        description: >
+          churn_rate = churned_customers / active_customers. Share of the
+          previous quarter's active customers that stopped buying.

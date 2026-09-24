@@ -1,0 +1,138 @@
+cubes:
+  - name: orders
+    sql_table: public.orders
+    data_source: default
+    title: Orders
+    description: >
+      Grain: one sales order per row. Fact table behind the governed
+      revenue, COGS and margin metrics of MetricMind.
+
+    joins:
+      - name: customers
+        relationship: many_to_one
+        sql: "{CUBE}.customer_id = {customers}.customer_id"
+      - name: regions
+        relationship: many_to_one
+        sql: "{CUBE}.region_code = {regions}.region_code"
+
+    dimensions:
+      - name: id
+        sql: order_id
+        type: string
+        title: Order ID
+        primary_key: true
+
+      - name: order_date
+        sql: order_date
+        type: time
+        title: Order date
+        description: "Fact timestamp. Quarter granularity is the default reporting grain (use dateRange + granularity=quarter)."
+
+      - name: quarter
+        sql: "to_char(order_date, 'YYYY-\"Q\"Q')"
+        type: string
+        title: Quarter
+        description: Labelled quarter, for example 2026-Q2.
+
+      - name: region
+        sql: region_code
+        type: string
+        title: Region
+        description: "Governed market region — EU, US or APAC (master data lives in the regions cube)."
+
+      - name: market
+        sql: market
+        type: string
+        title: Market
+        description: Sub-region inside a governed region, for example DACH or US West.
+
+      - name: category
+        sql: category
+        type: string
+        title: Category
+        description: "Product family — Hardware, Software, Services or Support & CS."
+
+      - name: channel
+        sql: channel
+        type: string
+        title: Channel
+        description: "Go-to-market channel — Direct, Partner or Online."
+
+      - name: customer_id
+        sql: customer_id
+        type: string
+        title: Customer ID
+        description: Foreign key to the customers cube.
+
+      - name: discount_pct
+        sql: discount_pct
+        type: number
+        title: Discount %
+        description: Line-level discount rate applied to list price (0.08 = 8%).
+
+    measures:
+      - name: revenue
+        sql: order_amount
+        type: sum
+        title: Revenue
+        description: >
+          revenue = SUM(order_amount). Net sales after discounts
+          (order_amount = quantity x unit_price x (1 - discount_pct)) —
+          the board-reported revenue definition.
+
+      - name: cogs
+        sql: cogs
+        type: sum
+        title: COGS
+        description: >
+          cogs = SUM(cogs). Cost of goods sold including delivery and
+          service-delivery cost — governed by Finance.
+
+      - name: margin
+        sql: "({revenue} - {cogs}) / NULLIF({revenue}, 0)"
+        type: number
+        title: Margin
+        description: >
+          margin = (revenue − COGS) / revenue. Governed gross-margin ratio,
+          always computed as a ratio of sums (never an average of row margins).
+
+      - name: order_count
+        type: count
+        title: Order count
+        description: order_count = COUNT(*). Number of order lines.
+
+      - name: units_sold
+        sql: quantity
+        type: sum
+        title: Units sold
+        description: units_sold = SUM(quantity).
+
+      - name: average_discount
+        sql: discount_pct
+        type: avg
+        title: Average discount
+        description: average_discount = AVG(discount_pct). Non-additive — always served from the source database.
+
+    pre_aggregations:
+      # Additive rollup: revenue/cogs/count are decomposable sums, so a large
+      # family of governed queries is answered from the materialised rollup
+      # instead of scanning the fact table. margin is then derived by the
+      # semantic layer from these pre-aggregated constituents.
+      - name: orders_rollup
+        type: rollup
+        measures:
+          - revenue
+          - cogs
+          - order_count
+          - units_sold
+        dimensions:
+          - region
+          - market
+          - category
+          - channel
+          - customers.segment
+        time_dimension: order_date
+        granularity: quarter
+        refresh_key:
+          every: 1 hour
+        scheduled_refresh: true

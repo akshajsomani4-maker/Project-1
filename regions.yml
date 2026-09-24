@@ -1,0 +1,35 @@
+cubes:
+  - name: regions
+    sql_table: public.regions
+    data_source: default
+    title: Regions
+    description: Governed region master — EU / US / APAC with board-approved margin targets.
+
+    dimensions:
+      - name: code
+        sql: region_code
+        type: string
+        title: Region code
+        primary_key: true
+
+      - name: name
+        sql: region_name
+        type: string
+        title: Region name
+
+      - name: continent
+        sql: continent
+        type: string
+        title: Continent
+
+      - name: margin_target
+        sql: margin_target
+        type: number
+        title: Margin target
+        description: "Board-approved target for the margin metric in this region (for example EU target = 0.290)."
+
+    measures:
+      - name: count
+        type: count
+        title: Regions
+        description: regions = COUNT(*). Number of governed regions.

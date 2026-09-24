@@ -1,0 +1,72 @@
+cubes:
+  - name: customers
+    sql_table: public.customers
+    data_source: default
+    title: Customers
+    description: >
+      Grain: one customer per row. Conformed customer master with the
+      governed segmentation used across MetricMind.
+
+    joins:
+      - name: regions
+        relationship: many_to_one
+        sql: "{CUBE}.region_code = {regions}.region_code"
+
+    dimensions:
+      - name: id
+        sql: customer_id
+        type: string
+        title: Customer ID
+        primary_key: true
+
+      - name: name
+        sql: customer_name
+        type: string
+        title: Customer name
+
+      - name: segment
+        sql: segment
+        type: string
+        title: Segment
+        description: "Governed segmentation — Enterprise, Mid-Market or SMB."
+
+      - name: region
+        sql: region_code
+        type: string
+        title: Region
+        description: "Governed market region — EU, US or APAC."
+
+      - name: market
+        sql: market
+        type: string
+        title: Market
+
+      - name: country
+        sql: country
+        type: string
+        title: Country
+
+      - name: signup_date
+        sql: signup_date
+        type: time
+        title: Signup date
+        description: Contract start date; filter this time dimension to count new customers in a period.
+
+    measures:
+      - name: count
+        type: count
+        title: Customers
+        description: customers = COUNT(*). Customer headcount (filter signup_date to measure new customers).
+
+    pre_aggregations:
+      - name: customers_rollup
+        type: rollup
+        measures:
+          - count
+        dimensions:
+          - segment
+          - region
+          - country
+        refresh_key:
+          every: 1 hour
+        scheduled_refresh: true

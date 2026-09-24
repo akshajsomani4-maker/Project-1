@@ -1,0 +1,125 @@
+# MetricMind — one-command startup:  docker compose -f infra/docker-compose.yml up --build
+#
+#   web    Next.js 14 + Tremor + ECharts chat UI          :3000
+#   api    FastAPI agent orchestrator (SSE)               :8000
+#   cube   Cube.dev semantic layer (metrics as code)     :4000
+#   db     Postgres governed warehouse (seeded on boot)   internal
+#
+# DuckDB runs embedded inside `api` (rogue Text-to-SQL comparison over seeds).
+
+name: metricmind
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: metricmind
+      POSTGRES_PASSWORD: metricmind
+      POSTGRES_DB: metricmind
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      # Init scripts run in alphabetical order on first boot:
+      # schema first, then bulk CSV load (paths are baked into 02_load.sql).
+      - ../seeds/01_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ../seeds/02_load.sql:/docker-entrypoint-initdb.d/02_load.sql:ro
+      - ../seeds/regions.csv:/docker-entrypoint-initdb.d/regions.csv:ro
+      - ../seeds/customers.csv:/docker-entrypoint-initdb.d/customers.csv:ro
+      - ../seeds/orders.csv:/docker-entrypoint-initdb.d/orders.csv:ro
+      - ../seeds/customer_quarters.csv:/docker-entrypoint-initdb.d/customer_quarters.csv:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U metricmind -d metricmind"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  cube:
+    build:
+      context: ../services/semantic
+    environment:
+      CUBEJS_API_SECRET: ${CUBE_API_SECRET:-metricmind-dev-secret}
+      CUBEJS_DB_TYPE: postgres
+      CUBEJS_DB_URL: postgres://metricmind:metricmind@db:5432/metricmind
+      # Explicit vars too, so a pure env-var config fallback also works.
+      CUBEJS_DB_HOST: db
+      CUBEJS_DB_PORT: "5432"
+      CUBEJS_DB_NAME: metricmind
+      CUBEJS_DB_USER: metricmind
+      CUBEJS_DB_PASS: metricmind
+      CUBEJS_DEV_MODE: "true"
+      CUBEJS_LOG_LEVEL: ${CUBE_LOG_LEVEL:-info}
+      CUBEJS_TELEMETRY: "false"
+      # Relative to Cube's working dir (/cube/conf): FileRepository joins
+      # path.join(cwd, schemaPath), so an absolute path would double up.
+      CUBEJS_SCHEMA_PATH: model
+    ports:
+      - "${CUBE_PORT:-4000}:4000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get({host:'localhost',port:4000,path:'/readyz'},r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 15s
+
+  api:
+    build:
+      context: ../apps/api
+    environment:
+      # --- semantic layer ---
+      CUBE_URL: http://cube:4000
+      CUBE_API_SECRET: ${CUBE_API_SECRET:-metricmind-dev-secret}
+      # --- LLM: mock = deterministic offline demo; openai = any OpenAI-compatible endpoint ---
+      LLM_PROVIDER: ${LLM_PROVIDER:-mock}
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:11434/v1}
+      LLM_API_KEY: ${LLM_API_KEY:-ollama}
+      LLM_MODEL: ${LLM_MODEL:-llama3.1:8b}
+      MAX_AGENT_STEPS: ${MAX_AGENT_STEPS:-8}
+      # --- data / presentation ---
+      DATA_MAX_DATE: ${DATA_MAX_DATE:-2026-06-30}
+      SEEDS_PATH: /data/seeds
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+    volumes:
+      - ../seeds:/data/seeds:ro
+    ports:
+      - "${API_PORT:-8010}:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      cube:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=5)",
+        ]
+      interval: 5s
+      timeout: 6s
+      retries: 30
+      start_period: 10s
+
+  web:
+    build:
+      context: ../apps/web
+      args:
+        API_PROXY_TARGET: http://api:8000
+    environment:
+      API_PROXY_TARGET: http://api:8000
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  db-data:

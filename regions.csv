@@ -1,0 +1,4 @@
+region_code,region_name,continent,margin_target
+EU,Europe,Europe,0.290
+US,North America,North America,0.295
+APAC,Asia-Pacific,Asia Pacific,0.280
